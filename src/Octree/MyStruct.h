@@ -4,13 +4,47 @@
 using namespace std;
 
 
-
+struct RenderData {
+	Point3f Postion;
+	float Itera;
+	RenderData() {}
+	RenderData(Point3f Pos, float I) {
+		Postion = Pos;
+		Itera = I;
+	}
+};
 
 struct BitBricks {
 	BYTE brick[4096] = {0};
+
 	//bool brick[4096];
 	//long long int brick[128];
 };
+
+struct CudaBitBricks {
+	Point3f InitPos;
+	int ParentNumber;
+	bool IsSuface;
+	BYTE brickNum = 4096;
+	BYTE brick[512] = { 0 };
+	BYTE Rendered[512] = { 0 };
+	//bool brick[4096];
+	//long long int brick[128];
+};
+
+struct BricksToRenderIndex {
+	byte bricksIndex;
+	int RenderIndex;
+};
+
+struct OctreeToBrick {
+	int OctreeIndex;
+	BricksToRenderIndex* BricksPointer;
+};
+
+
+
+
 
 struct Node {
 	bool exist;//标记Node节点是否存在
@@ -21,7 +55,6 @@ struct OctreeNode {
 	Point3f Origin;//对其计算得到Cutter的halfDimension;
 	Point3f HalfDimension;//对其计算得到Cutter的halfDimension;
 };
-
 
 struct BoundBox
 {
@@ -72,6 +105,7 @@ struct Bricks {
 		//for (int i = 0; i < 64; i++) {brick[i] = true;}
 	}
 };
+
 struct CudaOctree {
 	OctreeNode* HostOctree;
 	Node* HostBuffer;

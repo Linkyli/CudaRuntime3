@@ -117,9 +117,33 @@ public:
 	stack<Octree*> RenderedCube;
 	stack<Octree*> BrickChildToBeDelete;
 
+	byte ChildPosCode[8];
+
+
 	OctreeCut_2(Octree& copy, Point3f Center, Point3f CS) :C(Center), CutterSize(CS) {
 		Head = new Octree(copy);
-		
+
+		byte ChildCode;
+		byte Mask;
+
+		for (int i = 0; i < 8; i++) {
+			//初始化
+			ChildCode = 1;
+			Mask = 1;
+			//获取子节点在父节点的Z维度的部位信息
+			ChildCode = ChildCode << ((i & 1) + 4);
+
+			//获取子节点在父节点的Y维度的部位信息
+			Mask = Mask << ((i & 2) / 2 + 2);
+			ChildCode = ChildCode | Mask;
+
+			//获取子节点在父节点的X维度的部位信息
+			Mask = 1;
+			Mask = Mask << ((i & 4) / 4);
+			ChildCode = ChildCode | Mask;
+
+			ChildPosCode[i] = ChildCode;
+		}
 	}
 
 	//获取顶点在数组中的索引
@@ -251,7 +275,7 @@ public:
 		return OctreeVertex;
 	}
 
-	Point3f GetOctreeVertexForBrick(int number, Point3f& origin,Point3f& halfDimension) {
+	Point3f GetOctreeVertexForBrick(int number, Point3f& origin,Point3f halfDimension) {
 		Point3f OctreeVertex;
 
 		OctreeVertex.x = origin.x - halfDimension.x;
@@ -604,7 +628,11 @@ public:
 		//Cutter_Dynamic(CutterPos, Itera, CutterBox, MyDevice);
 		byte InitCode = -1;
 		bool IsSurface = true;
-		AddSurfacePoint_Cutter_Dynamic(CutterPos, Itera, CutterBox,InitCode,IsSurface);
+
+		Cutter_Dynamic_Surface(CutterPos, Itera, CutterBox, InitCode, IsSurface);
+		//IteraAddPointsForBrick512(Head, Itera);
+		AddSurfacePointsForBrick512(Head, Itera);
+		//AddSurfacePoint_Cutter_Dynamic(CutterPos, Itera, CutterBox,InitCode,IsSurface);
 	    //AddPoint_Cutter_Dynamic(CutterPos, Itera, CutterBox, MyDevice);
 		//IteraAddCube(Head);
 		//IteraAddtestCube(Head);
@@ -733,7 +761,6 @@ public:
 		return;
 
 	}
-
 
 	void AddPoints(Octree* curr) {
 		testVertex.clear();
@@ -916,6 +943,7 @@ public:
     //判断该bricks中代表的每个是否处于刀具内部，在刀具内部则将该位置的bool值设为true，代表不需要被渲染；
     //bricks结构中的rendered数组目前用于动态更新可渲染队列，你应该还不需要用到
 	void Deeper_cut512(Octree* curr, BoundBox& CutterBox, Point3f& CutterPos) {
+
 		Bricks* bri = (Bricks*)curr->bricks;
 		//Octree* temp = (Octree*)bri->brick;
 
@@ -935,7 +963,6 @@ public:
 
 			Point3f OctreeVertex;
 				if (IsIn(SubTemp, CutterPos)) {
-
 					bri->brick[k] = true;
 				}
 		}
@@ -943,6 +970,7 @@ public:
 
 	//如果不是surface那直接按照是否相交添加进渲染列表
 	void Deeper_cut512_ForSurface(Octree* curr, BoundBox& CutterBox, Point3f& CutterPos,byte CurrCode, bool IsSurface) {
+
 		Bricks* bri = (Bricks*)curr->bricks;
 		//Octree* temp = (Octree*)bri->brick;
 
@@ -953,75 +981,107 @@ public:
 		Point3f SubTemp;
 		Point3f halfDimension = Point3f(curr->halfDimension.x * precision, curr->halfDimension.y * precision, curr->halfDimension.z * precision);
 		//cout << "精度为:(" << halfDimension.x << "," << halfDimension.y << "," << halfDimension.z << ")  ";
-		SubTemp = SubOrigin;
-		if (!IsSurface) {
+		
+
+		if (!IsSurface) {//如果不是表面体素，那么直接根据它是否与刀具包围盒相交来决定是否加入渲染列表
+			//cout << "非表面" << endl;
 			for (int k = 0; k < BrickLength; ++k) {
 				if (bri->brick[k]) continue;
+				SubTemp = SubOrigin;
 				SubTemp.x = SubTemp.x + (k & 7) * curr->halfDimension.x / 4;
-				SubTemp.y = SubTemp.y + (k & 56) / 8 * curr->halfDimension.x / 4;
-				SubTemp.z = SubTemp.z + (k & 448) / 64 * curr->halfDimension.x / 4;
+				SubTemp.y = SubTemp.y + (k & 56) / 8 * curr->halfDimension.y / 4;
+				SubTemp.z = SubTemp.z + (k & 448) / 64 * curr->halfDimension.z / 4;
 				if (IsIn(SubTemp, CutterPos)) {
 					bri->brick[k] = true;
+					bri->Rendered[k] = false;
+					bri->sum--;
 					continue;
 				}
+				//bri->Rendered[k] = true;
+				//if (IsIntersectForBrick(SubTemp, halfDimension, CutterBox)) {bri->Rendered[k] = true;}
 
-				if (IsIntersectForBrick(SubTemp, halfDimension, CutterBox)) {
-					bri->Rendered[k] = true;
+				Point3f OctreeVertex;
+				//或许可以通过判断体素中心与刀具中心的距离来判断其是否应该被剔除，看体素中心是否在刀具内部
+				for (int i = 0; i <= 7; ++i) {
+					OctreeVertex = GetOctreeVertexForBrick(i, SubTemp, halfDimension * 2);
+					if (IsIn(OctreeVertex, CutterPos)) {
+                        bri->Rendered[k] = true;
+                        break;
+					}
 				}
+				//if (!bri->Rendered[k]) cout << "不被渲染" << endl;
+
 			}
+
+			if (!bri->sum) DeleteNode(curr);
 		}
 		else {
-			byte Mask = 1;
+			//cout << "表面" << endl;
+			/*byte Mask = 1;
 			int Index;
 			int t;//计算标志是+还是-;
 			int n;//计算标志是x或y或z;
 			int mask1 = 1;
 			int mask2 = 1;
 			for (Index = 0; Index < 6; Index++) {
+				Mask = 1;
 				Mask = Mask << Index;
 				Mask = CurrCode & Mask;
-				if (!Mask) break;
+				if (Mask) break;
 			}
+			*/
 			//推算出是哪个面后CurrCode已经无用了，后续可用于中间变量
 			for (int k = 0; k < BrickLength; ++k) {
+
 				if (bri->brick[k]) continue;
+
+				SubTemp = SubOrigin;
 				SubTemp.x = SubTemp.x + (k & 7) * curr->halfDimension.x / 4;
-				SubTemp.y = SubTemp.y + (k & 56) / 8 * curr->halfDimension.x / 4;
-				SubTemp.z = SubTemp.z + (k & 448) / 64 * curr->halfDimension.x / 4;
+				SubTemp.y = SubTemp.y + (k & 56) / 8 * curr->halfDimension.y / 4;
+				SubTemp.z = SubTemp.z + (k & 448) / 64 * curr->halfDimension.z / 4;
 
 				if (IsIn(SubTemp, CutterPos)) {
-					bri->brick[k] = true;//
-					bri->Rendered[k] = false;
+					bri->brick[k] = true;//清除该brick体素
+					bri->Rendered[k] = false;//不被加入渲染列表
+					bri->sum--;
 					continue;
 				}
+				bri->Rendered[k] = true;
 
-				if (IsIntersectForBrick(SubTemp, halfDimension, CutterBox)) {
-					bri->Rendered[k] =true;//加入渲染队列
+				//Point3f OctreeVertex;
+				//判断该体素是否与刀具相交，刀具包围盒不准确，因此直接使用刀具
+				/*
+				for (int i = 0; i <= 7; ++i) {
+					OctreeVertex = GetOctreeVertexForBrick(i, SubTemp, halfDimension);
+					if (IsIn(OctreeVertex, CutterPos)) {
+						bri->Rendered[k] = true;
+						break;
+					}
 				}
+				*/
+				/*
+				if (bri->Rendered[k] = true) { continue; }
 				else {
 					t = Index % 2;
 					n = (Index / 2) * 3;
 
-					mask1 = 1;
-					mask2 = 1;
-
-					mask1 = mask1 << n;
-					mask2 << (n + 1);
-					mask1 = mask2 | mask1;
-					mask2 = 1;
-					mask2 << (n + 2);
-					mask1 = mask1 | mask2;//mask转变为000 111 000  /  111 000 111 /  000 000 111
-
-					mask2 = k & mask1;//mask2如果为  111 000 000 / 000 111 000  /  000 000 111 或者0;则在表面；
+					mask1 = 7;
+					mask2 = 7;
+					mask1 << n;
+					mask2 = k & mask1;
 
 					if (t) {
-						if (mask2 == mask1) bri->Rendered[k] = true;;
+						if (mask2 == mask1) bri->Rendered[k] = true;
+						//else bri->Rendered[k] = false;
 					}
 					else {
 						if (mask2 == 0) bri->Rendered[k] = true;
-					}
+						//else bri->Rendered[k] = false;
+					} 
 				}
+				*/
 			}
+			if (!bri->sum) DeleteNode(curr);
 		}
 	}
 	void AddPoint_Deeper_cut512(Octree* curr, BoundBox& CutterBox, Point3f& CutterPos) {
@@ -1234,7 +1294,6 @@ public:
 		}
 	}
 
-
 	void AddPointsForBrick4096(Octree* curr, int& Itera) {
 		testVertex.clear();
 		IteraAddPointsForBrick4096(curr, Itera);
@@ -1290,6 +1349,68 @@ public:
 			for (auto child : curr->children) {
 				if (child) IteraAddPointsForBrick4096(child, Itera);
 
+			}
+		}
+	}
+
+	//添加表面体素
+	void AddSurfacePointsForBrick512(Octree* curr, int& Itera) {
+		testVertex.clear();
+		IteraAddSurfacePointsForBrick512(curr, Itera);
+	}
+
+	//添加表面体素
+	void IteraAddSurfacePointsForBrick512(Octree* curr, int& Itera) {
+		if (!curr->sub) {
+
+			if (curr->accuracy > Itera && curr->bricks)
+			{
+				//cout << "开始";
+				Bricks* Temp = (Bricks*)curr->bricks;
+				float precision = 0.125;
+
+				Point3f SubOrigin = Point3f(curr->origin.x - curr->halfDimension.x * 7 * precision,
+					curr->origin.y - curr->halfDimension.y * 7 * precision, curr->origin.z - curr->halfDimension.z * 7 * precision);
+				Point3f SubTemp;
+
+				Point3f halfDimension = Point3f(curr->halfDimension.x * precision, curr->halfDimension.y * precision, curr->halfDimension.z * precision);
+				Point3f OctreeVertex;
+
+				for (int i = 0; i < BrickLength; ++i) {
+
+					if(!Temp->brick[i] && Temp->Rendered[i])// //if (!Temp->brick[i]) ,&& Temp->Rendered[i],!Temp->brick[i] &&
+					{
+						SubTemp = SubOrigin;
+
+						SubTemp.x = SubTemp.x + (i & 7) * curr->halfDimension.x / 4;
+						SubTemp.y = SubTemp.y + (i & 56) / 8 * curr->halfDimension.y / 4;
+						SubTemp.z = SubTemp.z + (i & 448) / 64 * curr->halfDimension.z / 4;
+
+						OctreeVertex = GetOctreeVertexForBrick(0, SubTemp, halfDimension);
+						testVertex.push_back(OctreeVertex); testVertex.push_back(halfDimension);
+						OctreeVertex = GetOctreeVertexForBrick(7, SubTemp, halfDimension);
+						testVertex.push_back(OctreeVertex); testVertex.push_back(halfDimension * -1);
+						//cout << "添加成功";
+					}
+				}
+
+			}
+			else {
+				if (curr->Rendered) {
+					Point3f temp;
+					temp = GetOctreeVertex(0, curr);
+					testVertex.push_back(temp); testVertex.push_back(curr->halfDimension);
+					temp = GetOctreeVertex(7, curr);
+					testVertex.push_back(temp); testVertex.push_back(curr->halfDimension * (-1));
+				}
+			}
+		}
+		else
+		{
+			//if (!curr->sub) return;//判断是否存在子节点
+			for (auto child : curr->children) {
+				//if (child->exist) IteraAddPointsForBrick512(child, Itera);
+				if (child && (child->exist)) IteraAddSurfacePointsForBrick512(child, Itera);
 			}
 		}
 	}
@@ -1439,6 +1560,7 @@ public:
         
      };
 
+
 	void Cutter_Dynamic_Surface(Point3f& CutterPos, int& Itera, BoundBox& CutterBox, byte CurrCode, bool IsSurface) {
 		if (OctreeLine.empty()) return;
 
@@ -1451,7 +1573,7 @@ public:
 
 		//if (Itera > Iteration || curr->accuracy > Iteration )
 		//当八叉树节点达到分割极限后
-		if (curr->accuracy > Itera )//&& is_intersect
+		if (curr->accuracy > Itera && is_intersect)//
 		{
 			//如果当前八叉树叶子节点还没有被分配bricks结构，那么为它申请一个
 			if (curr->bricks == nullptr) {
@@ -1460,7 +1582,8 @@ public:
 			//Init_Data4096(curr, CutterBox, CutterPos, CutterSize, MyDevice);
 			//Init_Data512(curr, CutterBox, CutterPos, CutterSize);
 			//w为当前八叉树节点执行更深入的分割，bricks容量为512
-			Deeper_cut512(curr, CutterBox, CutterPos);
+			//Deeper_cut512(curr, CutterBox, CutterPos);
+			Deeper_cut512_ForSurface(curr, CutterBox, CutterPos,CurrCode,IsSurface);
 			//Deeper_cut(curr, CutterBox, CutterPos);
 			 //迭代次数达到最大，不可再分割，可以直接渲染,返回
 			return;
@@ -1478,7 +1601,9 @@ public:
 
 			//判断体素的8个点与刀具的空间关系
 			for (int i = 0; i <= 7; ++i) {
+
 				OctreeVertex = GetOctreeVertex(i, curr);
+
 				if (IsIn(OctreeVertex, CutterPos)) {
 					if (i == 7) {
 						//体素的8个顶点全部都被判断在刀具内，说明该体素节点可剔除
@@ -1495,35 +1620,41 @@ public:
 						VoxelNum += 7;//体素节点增加8个
 					}
 
-					byte ChildCode = 1;
-					byte Mask = 1;
+					byte ChildCode = 0;
+					//byte Mask = 1;
 					for (auto child : curr->children) {
 						if (!child) continue;
 						OctreeLine.push(child);//将体素节点压入栈
+						ChildCode = 0;
 						if (IsSurface) {
+							/*
 							//初始化
 							ChildCode = 1;
 							Mask = 1;
 							//获取Z维度的正负信息
-							ChildCode = ChildCode << (i & 1) + 4;
+							ChildCode = ChildCode << ((child->index & 1) + 4);
 
 							//获取Y维度的正负信息
-							Mask = Mask << (2 + (i & 2) / 2);
+							Mask = Mask << ((child->index & 2) / 2 + 2);
 							ChildCode = ChildCode | Mask;
-							Mask = 1;
 
 							//获取X维度的正负信息
-							Mask = Mask << ((i & 4) / 4);
+							Mask = 1;
+							Mask = Mask << ((child->index & 4) / 4);
 							ChildCode = ChildCode | Mask;
 
 							ChildCode = CurrCode & ChildCode;
 
-							if (!ChildCode) {
-								IsSurface = false;
-							}
-						}
-						child->RenderedIndex = IsSurface;
-						Cutter_Dynamic_Surface(CutterPos, Itera, CutterBox, ChildCode, IsSurface);
+							if (ChildCode == 0) { child->Rendered = false; }
+							else { child->Rendered = true; }
+
+						    */
+							ChildCode = CurrCode & ChildPosCode[child->index];
+							if (ChildCode == 0) { child->Rendered = false; }
+							else { child->Rendered = true; }
+							
+						}		
+						Cutter_Dynamic_Surface(CutterPos, Itera, CutterBox, ChildCode, child->Rendered);
 					}
 					//Cutter_Dynamic(CutterPos, Itera, CutterBox);
 					break;
@@ -1532,13 +1663,20 @@ public:
 			}
 		}
 		else {
-			curr->RenderedIndex = false;
+			if (IsSurface && !curr->sub) {
+				curr->Rendered = true;
+			}
+			else {
+				curr->Rendered = false;
+			}
 			return;
 		}
 
 		return;
 
 	};
+
+
 	void AddPoint_Cutter_Dynamic(Point3f& CutterPos, int& Itera, BoundBox& CutterBox, Device& MyDevice) {
 
 		if (OctreeLine.empty()) return;
@@ -1643,6 +1781,7 @@ public:
 		return;
 
 	};
+
 
 	void AddSurfacePoint_Cutter_Dynamic(Point3f& CutterPos, int& Itera, BoundBox& CutterBox,byte CurrCode,bool IsSurface) {
 		//Currcode指的是curr节点的编码，通过这个编码与curr的子节点的的编码处理，得到其子节点是否应该被加入

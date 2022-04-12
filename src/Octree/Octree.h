@@ -25,8 +25,9 @@ public:
 	int accuracy = 0;
 	int exist = 8;//该节点是否已被剔除
 	bool sub = false;//
-	int index;
+	byte index = 0;
 	int RenderedIndex = -1;//当RenderedIndex 不为-1时，证明该体素已被加入可渲染列表
+	bool Rendered = false;
 	//byte IsSurface;
 	//int sum = 8;
 	void* Parent = nullptr;
